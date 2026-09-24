@@ -26,7 +26,7 @@ import subprocess
 import sys
 import time
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 
 SKIP_DIRS = {
     ".git", ".hg", ".svn", ".bzr",
@@ -314,12 +314,17 @@ def wanted_by_name(path, o):
     return any(fnmatch.fnmatch(base, g) or fnmatch.fnmatch(path, g) for g in o.named)
 
 
-def looks_binary(path):
+def sniff(path):
+    """True binary, False text, None when the file cannot be opened at all.
+
+    An unreadable file is not a binary. It is a file you cannot read, and the
+    summary says so in its own words rather than folding it into another number.
+    """
     try:
         with open(path, "rb") as fh:
             chunk = fh.read(BINARY_SNIFF)
     except OSError:
-        return True
+        return None
     return b"\0" in chunk
 
 
@@ -509,6 +514,7 @@ def run(o, pal):
 
     looked = 0
     skipped_binary = 0
+    unreadable = 0
     skipped_big = 0
     name_map = {}
     text_map = {}
@@ -550,7 +556,11 @@ def run(o, pal):
             for path, st in walk(o.root, o):
                 if not wanted_by_stat(st, o) or not wanted_by_name(path, o):
                     continue
-                if looks_binary(path):
+                sniffed = sniff(path)
+                if sniffed is None:
+                    unreadable += 1
+                    continue
+                if sniffed:
                     skipped_binary += 1
                     continue
                 lines = read_lines(path, o)
@@ -580,6 +590,7 @@ def run(o, pal):
     return blocks, dict(
         looked=looked, by_name=files_by_name, with_text=files_with_text,
         lines=lines_total, binary=skipped_binary, big=skipped_big, engine=engine,
+        unreadable=unreadable,
         lister=o.listed_by, ignored=not o.no_ignore,
     )
 
@@ -589,8 +600,12 @@ def _extras(o, stats):
     extras = []
     if stats.get("engine") == "rg":
         extras.append("read by rg across all cores")
+    elif stats.get("engine") == "in-process":
+        extras.append("read in-process, one file at a time")
     if stats.get("lister") == "fd":
         extras.append("listed by fd")
+    elif stats.get("lister") == "walk" and stats.get("looked"):
+        extras.append("listed by our own walk")
     if stats.get("ignored"):
         extras.append("machine dirs skipped" if not o.skipped_dirs
                       else "%d machine dirs skipped" % o.skipped_dirs)
@@ -598,6 +613,8 @@ def _extras(o, stats):
         extras.append("%d binary skipped" % stats["binary"])
     if stats["big"]:
         extras.append("%d over the size cap" % stats["big"])
+    if stats.get("unreadable"):
+        extras.append("%d unreadable" % stats["unreadable"])
     sec = stats.get("elapsed")
     if sec is not None:
         extras.append("in %.2f s" % sec if sec < 60
