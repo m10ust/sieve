@@ -69,6 +69,9 @@ caches, browser profiles, compiled runtimes. The summary always says what was sk
 A match inside a very long line gets a window around it, with an ellipsis on whichever side
 was cut, so the word is visible instead of buried in ninety thousand characters of transcript.
 
+A filename containing a newline or a tab is escaped on display, so one file is always exactly
+one line of output and nothing reading it sees a file that does not exist.
+
 It always says something. A run that matched nothing still prints what it looked at and how
 long it took.
 
@@ -95,6 +98,12 @@ The first working version took ninety seconds on the same tree.
 
 Builds a scratch tree with known answers and checks the behaviour above, including the exit
 codes, the ignore list, and the pipe safety.
+
+Both lanes are exercised on odd trees as well, the fast one and the slow one: FIFOs, symlink
+loops, broken symlinks, unreadable files and directories, latin-1 lines, files with no trailing
+newline, empty files, binaries, a 96 KB single line, a file over the size cap, and filenames
+containing spaces, tabs, colons, quotes, backslashes, emoji, a leading dash and a newline. The
+two lanes have to return the same answer on every one of them.
 
 ## License
 

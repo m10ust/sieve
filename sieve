@@ -26,7 +26,7 @@ import subprocess
 import sys
 import time
 
-VERSION = "0.3.1"
+VERSION = "0.3.3"
 
 SKIP_DIRS = {
     ".git", ".hg", ".svn", ".bzr",
@@ -280,7 +280,7 @@ def fd_list(root, o):
     """
     fd = shutil.which("fd")
     if fd:
-        cmd = [fd, "-H", "-I", "-t", "f", "."]
+        cmd = [fd, "-H", "-I", "-t", "f", "--print0", "."]
         if not o.no_ignore:
             for d in sorted(SKIP_DIRS):
                 cmd += ["-E", d]
@@ -290,7 +290,7 @@ def fd_list(root, o):
         try:
             proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                   text=True, encoding="utf-8", errors="replace")
-            paths = [os.path.normpath(p) for p in proc.stdout.splitlines() if p]
+            paths = [os.path.normpath(p) for p in proc.stdout.split("\0") if p]
             if paths or proc.returncode in (0, 1):
                 return paths, "fd"
         except OSError:
@@ -518,7 +518,7 @@ def run(o, pal):
     skipped_big = 0
     name_map = {}
     text_map = {}
-    engine = "in-process"
+    engine = None
 
     # the names half: a fast listing (fd) plus our own name match. Stat is only
     # called when a time or size filter is actually in play.
@@ -550,6 +550,7 @@ def run(o, pal):
             else:
                 engine = "rg"
         if fail or not rg:
+            engine = "in-process"
             if not o.files:
                 for _p, _st in walk(o.root, o):
                     looked += 1
@@ -596,6 +597,19 @@ def run(o, pal):
 
 
 # --------------------------------------------------------------------------- report
+def display_path(path):
+    """A path with control characters escaped, so one file is always one line.
+
+    A newline inside a filename would otherwise split a block header in two, and
+    anything reading this output would see a file that does not exist. Backslashes
+    are only doubled when there is something to escape.
+    """
+    if "\n" not in path and "\r" not in path and "\t" not in path:
+        return path
+    return (path.replace("\\", "\\\\").replace("\n", "\\n")
+                .replace("\r", "\\r").replace("\t", "\\t"))
+
+
 def _extras(o, stats):
     extras = []
     if stats.get("engine") == "rg":
@@ -634,12 +648,13 @@ def report(o, pal, blocks, stats, line_rx):
     for path, reason, named, hits in blocks:
         if o.count:
             if hits or named:
-                print("%6d  %s" % (len(hits) if hits else 0, path))
+                print("%6d  %s" % (len(hits) if hits else 0, display_path(path)))
                 total_shown += 1
                 if len(hits) > o.max_per_file > 0:
                     hidden += len(hits) - o.max_per_file
             continue
-        print("%s%s%s %s%s%s" % (pal.file, path, pal.reset, pal.reason, reason, pal.reset))
+        print("%s%s%s %s%s%s" % (pal.file, display_path(path), pal.reset,
+                                 pal.reason, reason, pal.reset))
         shown = hits
         if o.max_per_file and len(hits) > o.max_per_file:
             shown = hits[:o.max_per_file]
